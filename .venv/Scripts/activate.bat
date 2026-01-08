@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=D:\Whatsapp_Bot\.venv
+set VIRTUAL_ENV=B:\TplPermanent\autoregbot\AutoRegBot\Sales_Bot\.venv
 
 if not defined PROMPT set PROMPT=$P$G
 
