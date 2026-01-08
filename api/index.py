@@ -1,11 +1,12 @@
+# api/index.py (Vercel) and main.py (local) — Identical
+
 from fastapi import FastAPI, Request, Query
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, JSONResponse
+import requests
 import os
 import json
 from dotenv import load_dotenv
-
-from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
-import torch
+from groq import Groq
 
 # Load environment variables
 load_dotenv()
@@ -16,71 +17,54 @@ app = FastAPI()
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# === System Prompt (defines bot behavior) ===
+# Initialize Groq client
+client = Groq(api_key=GROQ_API_KEY)
+
+# Preferred model — fast, powerful, great for professional assistant
+GROQ_MODEL = "llama-3.3-70b-versatile"  # You can change to "mixtral-8x7b-32768" or "gemma2-9b-it" later
+
+# === System Prompt - Defines Bot Behavior (Phase 1 Ready) ===
 SYSTEM_PROMPT = """
 You are the official TPL Trakker Auto-Reg WhatsApp Bot.
 
-You help field technicians quickly check vehicle installation status and tracker details.
+You assist field technicians by helping them quickly verify installation status and tracker details.
 
-Key guidelines:
+Key Guidelines:
 - Always respond professionally, clearly, and concisely in English.
 - Be friendly and patient.
-- Your main goal is to get the vehicle registration number (e.g., ABC-123) or Job ID from the technician.
-- If they send a plate or job ID, acknowledge it and say you're checking.
-- If they ask about battery tamper, accelerometer, wiring type, etc., confirm you're retrieving live status.
-- If the message is unclear or a greeting, politely guide them to send the vehicle reg or job ID.
-- Never share fake data — just confirm you're searching or checking.
+- Your primary goal is to obtain the vehicle registration number (e.g., ABC-123, KAR-456) or Job ID (e.g., 5678).
+- If a vehicle reg or job ID is provided, acknowledge it and confirm you're checking.
+- If they mention battery tamper, accelerometer, wiring type, or any device parameter, confirm you're retrieving live status.
+- If the message is a greeting or unclear, politely ask for the vehicle registration or Job ID.
+- NEVER invent or display fake data — only confirm actions like "searching" or "checking".
+- Use emojis sparingly for better readability (e.g., 🔍, ✅, ⏳).
 
 Examples:
-User: Hi → "Hello! Please send the vehicle registration (e.g., ABC-123) or Job ID to check status."
-User: ABC-123 → "Searching for vehicle ABC-123... One moment please."
-User: Job 5678 battery tamper? → "Checking Job 5678 — retrieving pass status and battery tamper info..."
-User: Is pass issued for KAR-456? → "Let me check vehicle KAR-456 for you. One moment..."
+- User: Hi → Hello! Please send the vehicle registration (e.g., ABC-123) or Job ID to check status.
+- User: ABC-123 → 🔍 Searching for vehicle ABC-123... One moment please.
+- User: job 5678 battery tamper → ✅ Checking Job 5678 — retrieving pass status and battery tamper info...
 """
 
-# === Load Model ONCE at startup (Vercel cold start) ===
-print("Loading flan-t5-base model with 8-bit quantization...")
-
-tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
-model = AutoModelForSeq2SeqLM.from_pretrained(
-    "google/flan-t5-base",
-    device_map="auto",          # Uses CPU automatically
-    load_in_8bit=True,          # Reduces memory ~50%
-    torch_dtype=torch.float16   # Further optimization
-)
-
-generator = pipeline(
-    "text2text-generation",
-    model=model,
-    tokenizer=tokenizer,
-    max_new_tokens=128,
-    temperature=0.7,
-    do_sample=True
-)
-
-print("Model loaded successfully!")
-
-# === Generate Response ===
+# === Generate Response Using Groq ===
 def generate_response(user_message: str) -> str:
-    prompt = f"{SYSTEM_PROMPT}\n\nTechnician message: \"{user_message}\"\nBot response:"
-
     try:
-        result = generator(prompt)
-        reply = result[0]["generated_text"]
-
-        # Clean output (remove echoed prompt if present)
-        if "Bot response:" in reply:
-            reply = reply.split("Bot response:", 1)[1].strip()
-
-        if not reply.strip():
-            reply = "One moment please while I process your request."
-
-        return reply
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}
+            ],
+            model=GROQ_MODEL,
+            temperature=0.6,
+            max_tokens=150,
+            top_p=0.9
+        )
+        return chat_completion.choices[0].message.content.strip()
 
     except Exception as e:
-        print("Model inference error:", str(e))
-        return "Sorry, I'm having a technical issue right now. Please try again in a minute."
+        print("Groq API Error:", str(e))
+        return "I'm having a temporary issue connecting. Please try again in a moment."
 
 
 # === Send WhatsApp Message ===
@@ -95,9 +79,9 @@ def send_message(to: str, text: str):
     }
     try:
         r = requests.post(url, json=payload, headers=headers, timeout=10)
-        print("Sent:", r.status_code, r.json())
+        print("WhatsApp Send:", r.status_code, r.json())
     except Exception as e:
-        print("Send failed:", e)
+        print("Failed to send message:", e)
 
 
 # === Webhook Verification ===
@@ -116,7 +100,7 @@ async def verify_webhook(
 @app.post("/webhook")
 async def receive_message(request: Request):
     data = await request.json()
-    print("Incoming:", json.dumps(data, indent=2))
+    print("Incoming webhook:", json.dumps(data, indent=2))
 
     try:
         entry = data["entry"][0]["changes"][0]["value"]
@@ -127,16 +111,19 @@ async def receive_message(request: Request):
         sender = msg["from"]
         user_text = msg["text"]["body"].strip()
 
+        # Generate smart reply using Groq
         reply = generate_response(user_text)
+
+        # Send reply
         send_message(sender, reply)
 
     except Exception as e:
-        print("Error:", e)
+        print("Error processing message:", e)
 
     return {"status": "ok"}
 
 
-# For local testing
+# For local testing with uvicorn
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

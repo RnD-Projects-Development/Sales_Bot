@@ -1,0 +1,17 @@
+Metadata-Version: 2.1
+Name: test-py
+Version: 0.3
+Summary: A Test Package
+Home-page: https://github.com/devvpm/Spoon-Knife
+Author: Vinod Moorkoth
+Author-email: vinoditb@gmail.com
+License: UNKNOWN
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Description-Content-Type: text/markdown
+
+MY README HERE
+All that's missing is the fork. Heh.
+

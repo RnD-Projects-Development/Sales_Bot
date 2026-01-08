@@ -42,7 +42,7 @@ User: Is pass issued for KAR-456? → "Let me check vehicle KAR-456 for you. One
 # === Load Model ONCE at startup (Vercel cold start) ===
 print("Loading flan-t5-base model with 8-bit quantization...")
 
-tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
+tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-small")
 model = AutoModelForSeq2SeqLM.from_pretrained(
     "google/flan-t5-base",
     device_map="auto",          # Uses CPU automatically
